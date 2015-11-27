@@ -509,5 +509,5 @@ def drop_table():
 
 ##Program starts
 
-#create_table()
+create_table()
 
