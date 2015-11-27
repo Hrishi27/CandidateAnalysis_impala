@@ -47,7 +47,6 @@ if not (targets and outdir and configfile):
     sys.exit(2)
 
 
-
 ##This allows reading and parsing of the configuration file
 
 def ConfigSectionMap(section):
@@ -82,6 +81,7 @@ db_user=ConfigSectionMap("Inputs")["db_user"]
 
 subject_list=subject_id.split(',')
 
+
 ##header_out add output headers to the output file
 def header_out(pattern,writer):
     writer.write ('#Program_name: '+  __file__ + "\n")
@@ -103,10 +103,15 @@ for pattern in target_inheritance:
     header_out(pattern,writer_pattern)
 
 ##Database connection to Impala
-conn=connect(host='glados19', port=21050,database=db_user)
-DB = conn.cursor()
-DB.execute("SELECT VERSION()")
-results=DB.fetchone()
+try:
+    conn=connect(host='glados19', port=21050,database=db_user)
+    DB = conn.cursor()
+    DB.execute("SELECT VERSION()")
+    results=DB.fetchone()
+    print ("Connection successful")
+except:
+    print("Connection failed, check if connection parameters are correct")
+    sys.exit()
 
 segregation_object=segregation()  #Object for the segregation class
 
@@ -504,5 +509,5 @@ def drop_table():
 
 ##Program starts
 
-create_table()
+#create_table()
 
