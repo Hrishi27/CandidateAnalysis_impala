@@ -9,7 +9,12 @@ import sys
 import os.path
 import ConfigParser
 import getopt
+import logging
 
+LOG_FILENAME = 'Pedigree.log'
+logging.basicConfig(filename=LOG_FILENAME,
+                    level=logging.ERROR,
+                    )
 
 #records timing
 today = datetime.date.today()
@@ -47,6 +52,7 @@ if not (targets and outdir and configfile):
     sys.exit(2)
 
 
+
 ##This allows reading and parsing of the configuration file
 
 def ConfigSectionMap(section):
@@ -81,7 +87,6 @@ db_user=ConfigSectionMap("Inputs")["db_user"]
 
 subject_list=subject_id.split(',')
 
-
 ##header_out add output headers to the output file
 def header_out(pattern,writer):
     writer.write ('#Program_name: '+  __file__ + "\n")
@@ -103,15 +108,10 @@ for pattern in target_inheritance:
     header_out(pattern,writer_pattern)
 
 ##Database connection to Impala
-try:
-    conn=connect(host='glados19', port=21050,database=db_user)
-    DB = conn.cursor()
-    DB.execute("SELECT VERSION()")
-    results=DB.fetchone()
-    print ("Connection successful")
-except:
-    print("Connection failed, check if connection parameters are correct")
-    sys.exit()
+conn=connect(host='glados19', port=21050,database=db_user)
+DB = conn.cursor()
+DB.execute("SELECT VERSION()")
+results=DB.fetchone()
 
 segregation_object=segregation()  #Object for the segregation class
 
@@ -182,16 +182,21 @@ This is similiar to above score modifier.
 The motivation behind this function is to return low value
 for highly pathogenic variants.
 """
-
 def dann_score_modifier(dann_score):
     if dann_score >= 0.995:
-       return 0.1
+        return 1
     elif dann_score >= 0.98 and dann_score < 0.995:
-       return 0.5
-    elif dann_score >= 0.93 and dann_score < 0.98:
-       return 0.7
+        return 1.1
+    elif dann_score >=0.93 and dann_score < 0.98:
+        return 1.3 - (0.18 * (dann_score - 0.98)/0.05)
+    elif dann_score >= 0.9 and dann_score < 0.93:
+        return 1.5- (0.18 * (dann_score - 0.93)/0.03)
+    elif dann_score >=0.85 and dann_score < 0.9:
+        return 1.7 - (0.09 * (dann_score - 0.9)/0.05)
+    elif dann_score >=0.80 and dann_score < 0.85:
+        return 1.8 - (0.2 * (dann_score - 0.85)/0.05)
     else:
-       return 1
+        return 2 - (3 * (dann_score - 0.8)/0.8)
 
 """
 The overall candidate score is a rank given to a variant based 
@@ -201,7 +206,7 @@ Lower candidate score means that a variant is likely to be more pathogenic
 def overall_candidate_score(genetic_analysis_stress,queried_allele_frequency,dann_score,max_score,cms):
     QAF_score_modified=QAF_score_modifier(queried_allele_frequency)
     modified_dann=dann_score_modifier(dann_score)
-    score = ((genetic_analysis_stress + 1) * (1 + QAF_score_modified) * (1 + cms) * modified_dann)
+    score = ((genetic_analysis_stress + 1) * QAF_score_modified * (1 + cms) * modified_dann)
     adjusted_quality_score = quality_score_adjustment(max_score)
     overall_score = score * (1 + adjusted_quality_score)
     return(overall_score) 
@@ -282,11 +287,14 @@ def process_alleles(list):
     dann['max']=dann[maximum]
 
     freq=0
+    min_freq={}
     for value in kaviar:
-        freq += kaviar[value]
+        val=0
+        val=1-kaviar[value]
+        min_freq[val]=1
 
-    reference_freq=(1.0 - freq)    
-    kaviar[reference]=reference_freq
+    min_val=min(min_freq,key=min_freq.get)
+    kaviar[reference]=min_val
 
     gene_string=' '.join(gene.keys())
     allele_string=''
@@ -327,7 +335,17 @@ def process_alleles(list):
 		       allele_array.append(allele)
 		       allele_string += allele
 		       allele_string += ' '
-		   
+	       elif GT[member]=="2/2":
+                   alt=subject[member].keys()
+                   alt=''.join(alt)
+                   allele_array.append(alt)
+                   allele_array.append(alt)
+                   allele_string += alt
+                   allele_string += ' '
+                   allele_string += alt
+                   allele_string += ' '
+	 ## Here we would be missing alleles that have a missing genotype(GT 1 or GT 0) 
+         ## These positions with missing genotype are recorded in the log file (check target_test function)		   
         else:
             allele_array.append(reference)
 	    allele_array.append(reference)
@@ -343,6 +361,7 @@ def process_alleles(list):
             genotype_vectors=segregation_object.standardized_genotype_vector_with_reference_to_a_particular_allele(allele_array,candidate)
             candidate_stress=segregation_object.target_test(genotype_vectors,target_pattern)
             if candidate_stress=='NA':
+	        logging.error("unequal target and genotype_vectors" + ' ' + chromosome + ' ' + str(position) +  ' ' + "due to inconsistent GT representation")
                 continue
             kaviar_score=0
             dann_score=0
